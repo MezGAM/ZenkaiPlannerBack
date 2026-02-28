@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const mysql = require('mysql2');
+const mysql = require('mysql2/promise');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { enviarBienvenida } = require('mailer');
@@ -9,21 +9,20 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-const db = mysql.createConnection({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'zenkai_db'
-});
+const connectionConfig = {
+  host: process.env.TIDB_HOST,
+  port: process.env.TIDB_PORT,
+  user: process.env.TIDB_USER,
+  password: process.env.TIDB_PASSWORD,
+  database: process.env.TIDB_DATABASE,
+  ssl: {
+    minVersion: 'TLSv1.2',
+    rejectUnauthorized: true 
+  }
+};
 
-db.connect((err) => {
-    if (err) {
-        console.error('Error conectando a mysql:', err.message);
-        return;
-    }
-    console.log('Conectado a MySQL exitosamente');
-});
-
+const pool = mysql.createPool(connectionConfig);
+module.exports = pool;
 
 app.post('/api/auth/registrar', async (req, res) => {
     const { email, username, password, mascota } = req.body;
