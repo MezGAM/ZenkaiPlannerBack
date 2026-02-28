@@ -22,49 +22,39 @@ const connectionConfig = {
 };
 
 const pool = mysql.createPool(connectionConfig);
-module.exports = pool;
 
 app.post('/api/auth/registrar', async (req, res) => {
     const { email, username, password, mascota } = req.body;
-    
     try {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
-
         const query = 'INSERT INTO usuarios (email, username, password, mascota_elegida) VALUES (?, ?, ?, ?)';
+        await pool.query(query, [email, username, passwordHash, mascota]);
 
-        db.query(query, [email, username, passwordHash, mascota], async (err, result) => {
-            if (err) {
-                console.error('Error en DB al registrar:', err.message);
-                return res.status(500).json({ error: 'Error al registrar en la base de datos' });
-            }
+        try {
+            await enviarBienvenida(email, username);
+        } catch (mailError) {
+            console.error('Usuario creado, pero el envío de correo falló');
+        }
 
-            try {
-                await enviarBienvenida(email, username);
-            } catch (mailError) {
-                console.error('Usuario creado, pero correo falló');
-            }
-
-            res.status(200).json({ mensaje: '¡Registro exitoso!' });
-        });
+        res.status(200).json({ mensaje: '¡Registro exitoso!' });
     } catch (error) {
-        res.status(500).json({ error: 'Error interno del servidor' });
+        console.error('Error en registro:', error);
+        res.status(500).json({ error: 'Error al registrar en la base de datos' });
     }
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
     const { username, password } = req.body;
+    try {
+        const sql = 'SELECT * FROM usuarios WHERE username = ?';
+        const [results] = await pool.query(sql, [username]);
 
-    const sql = 'SELECT * FROM usuarios WHERE username = ?';
-    db.query(sql, [username], async (err, results) => {
-        if (err) return res.status(500).json({ error: "Error en el servidor" });
-        
         if (results.length === 0) {
             return res.status(401).json({ error: "El usuario no existe" });
         }
 
         const usuario = results[0];
-
         const coinciden = await bcrypt.compare(password, usuario.password);
 
         if (coinciden) {
@@ -76,83 +66,102 @@ app.post('/api/auth/login', (req, res) => {
         } else {
             res.status(401).json({ error: "Contraseña incorrecta" });
         }
-    });
+    } catch (error) {
+        console.error('Error en login:', error);
+        res.status(500).json({ error: "Error en el servidor" });
+    }
 });
 
-app.post('/api/tareas', (req, res) => {
+
+app.post('/api/tareas', async (req, res) => {
     const { username, fecha, titulo, hora } = req.body;
-    const query = 'INSERT INTO tareas (username, fecha, titulo, hora) VALUES (?, ?, ?, ?)';
-    
-    db.query(query, [username, fecha, titulo, hora], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
+    try {
+        const query = 'INSERT INTO tareas (username, fecha, titulo, hora) VALUES (?, ?, ?, ?)';
+        const [result] = await pool.query(query, [username, fecha, titulo, hora]);
         res.status(200).json({ mensaje: 'Tarea guardada', id: result.insertId });
-    });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
-app.get('/api/tareas/:username', (req, res) => {
+app.get('/api/tareas/:username', async (req, res) => {
     const username = req.params.username;
-    const query = 'SELECT * FROM tareas WHERE username = ?';
-    
-    db.query(query, [username], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
+    try {
+        const query = 'SELECT * FROM tareas WHERE username = ?';
+        const [results] = await pool.query(query, [username]);
         res.status(200).json(results);
-    });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
-app.delete('/api/tareas/:id', (req, res) => {
+app.delete('/api/tareas/:id', async (req, res) => {
     const id = req.params.id;
-    db.query('DELETE FROM tareas WHERE id = ?', [id], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
+    try {
+        await pool.query('DELETE FROM tareas WHERE id = ?', [id]);
         res.status(200).json({ mensaje: 'Tarea eliminada' });
-    });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
-app.post('/api/metas', (req, res) => {
-    const { username, texto } = req.body;
-    const sql = 'INSERT INTO metas (username, texto) VALUES (?, ?)';
-    db.query(sql, [username, texto], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(200).json({ id: result.insertId });
-    });
-});
-
-app.get('/api/metas/:username', (req, res) => {
-    const { username } = req.params;
-    const sql = 'SELECT * FROM metas WHERE username = ?';
-    db.query(sql, [username], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(200).json(results);
-    });
-});
-
-app.delete('/api/metas/:id', (req, res) => {
-    const { id } = req.params;
-    db.query('DELETE FROM metas WHERE id = ?', [id], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(200).json({ mensaje: "Meta eliminada" });
-    });
-});
-
-app.patch('/api/tareas/:id', (req, res) => {
+app.patch('/api/tareas/:id', async (req, res) => {
     const { id } = req.params;
     const valorCompletada = req.body.completada ? 1 : 0; 
-
-    const sql = 'UPDATE tareas SET completada = ? WHERE id = ?';
-    db.query(sql, [valorCompletada, id], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
+    try {
+        const sql = 'UPDATE tareas SET completada = ? WHERE id = ?';
+        await pool.query(sql, [valorCompletada, id]);
         res.status(200).json({ mensaje: "Actualizado" });
-    });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
-app.patch('/api/metas/:id', (req, res) => {
+app.post('/api/metas', async (req, res) => {
+    const { username, texto } = req.body;
+    try {
+        const sql = 'INSERT INTO metas (username, texto) VALUES (?, ?)';
+        const [result] = await pool.query(sql, [username, texto]);
+        res.status(200).json({ id: result.insertId });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/metas/:username', async (req, res) => {
+    const { username } = req.params;
+    try {
+        const sql = 'SELECT * FROM metas WHERE username = ?';
+        const [results] = await pool.query(sql, [username]);
+        res.status(200).json(results);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/metas/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM metas WHERE id = ?', [id]);
+        res.status(200).json({ mensaje: "Meta eliminada" });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.patch('/api/metas/:id', async (req, res) => {
     const { id } = req.params;
     const { completada } = req.body;
-    const sql = 'UPDATE metas SET completada = ? WHERE id = ?';
-    db.query(sql, [completada, id], (err) => {
-        if (err) return res.status(500).json({ error: err.message });
+    try {
+        const sql = 'UPDATE metas SET completada = ? WHERE id = ?';
+        await pool.query(sql, [completada, id]);
         res.status(200).json({ mensaje: "estado de meta actualizado" });
-    });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Servidor Zenkai corriendo en puerto ${PORT} `));
+const PORT = process.env.PORT || 10000; 
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor Zenkai corriendo en puerto ${PORT}`);
+});
