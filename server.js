@@ -29,7 +29,7 @@ app.post('/api/auth/registrar', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
         const query = 'INSERT INTO usuarios (username, password, mascota_elegida, email) VALUES (?, ?, ?, ?)';
-        await pool.query(query, [username, password, mascota, email]);
+        await pool.query(query, [username, passwordHash, mascota, email]);
 
         try {
             await enviarBienvenida(email, username);
